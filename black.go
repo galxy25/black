@@ -1,13 +1,15 @@
 // Package black provides functions for solving cryptopals challanges.
 // https://cryptopals.com
-package black
+package main
 
 import (
     "bufio"
+    "bytes"
     "encoding/base64"
     "encoding/hex"
     "errors"
     "fmt"
+    "io/ioutil"
     "os"
     "strings"
     "unicode"
@@ -24,7 +26,7 @@ var englishLanguageCharactedExpectedFrequencies = []float64{
 }
 
 func main() {
-    fmt.Println("From black to red and black again.")
+    fmt.Println(BreakRepeatingKeyXOR("samples/6.txt"))
 }
 
 // ConvertHexToBase64 converts a hex string to its base64 encoding,
@@ -172,6 +174,109 @@ func RepeatingKeyXOR(value string, key string) string {
         currentkeyIndex = currentkeyIndex % keyLength
     }
     return hex.EncodeToString(rawResult)
+}
+
+// HammmingDistance returns the hamming distance between two byte arrays.
+// https://en.wikipedia.org/wiki/Hamming_distance
+func HammingDistance(top, bottom []byte) int {
+    var distance int
+    for bit := range top {
+        // Perform an xor to see if the current bytes of top are the same
+        innerBit := top[bit] ^ bottom[bit]
+        for innerBit > 0 {
+            if innerBit&1 == 1 {
+                distance++
+            }
+            // Remove the top bit we just checked to get to the next
+            innerBit = innerBit >> 1
+        }
+    }
+    return distance
+}
+
+func BreakRepeatingKeyXOR(base64EncodedFilePath string) int {
+    var bestGuessKeySize int
+    bestHammingDistance := 1000
+    // There's a file here.
+    // It's been base64'd after being encrypted with repeating-key XOR.
+    // Decrypt it.
+    file, err := os.Open(base64EncodedFilePath)
+    if err != nil {
+        return 0
+    }
+    base64Content, err := ioutil.ReadAll(file)
+    if err != nil {
+        return 1
+    }
+    // fmt.Println(string(base64Content))
+    rawContent, err := base64.StdEncoding.DecodeString(string(base64Content))
+    if err != nil {
+        return 2
+    }
+    // fmt.Println(rawContent)
+    //     For each KEYSIZE, take the first KEYSIZE worth of bytes, and the second KEYSIZE worth of bytes, and find the edit distance between them. Normalize this result by dividing by KEYSIZE.
+    // The KEYSIZE with the smallest normalized edit distance is probably the key. You could proceed perhaps with the smallest 2-3 KEYSIZE values. Or take 4 KEYSIZE blocks instead of 2 and average the distances.
+    for currentKeySizeGuess := 1; currentKeySizeGuess < 40; currentKeySizeGuess++ {
+        innerCopy := make([]byte, len(rawContent))
+        copy(innerCopy, rawContent)
+        buff := bytes.NewBuffer(innerCopy)
+        firstKeySizeWorthOfBytes := make([]byte, currentKeySizeGuess)
+        secondKeySizeWorthOfBytes := make([]byte, currentKeySizeGuess)
+        _, err := buff.Read(firstKeySizeWorthOfBytes)
+        if err != nil {
+            return 3
+        }
+        hammingDistance := HammingDistance(firstKeySizeWorthOfBytes, secondKeySizeWorthOfBytes)
+        // fmt.Printf("Current: %v %v\n", hammingDistance, currentKeySizeGuess)
+        // Need to support floats
+        if hammingDistance != 0 {
+            hammingDistance /= currentKeySizeGuess
+        }
+        if hammingDistance < bestHammingDistance {
+            // fmt.Printf("New best: %v %v\n", hammingDistance, currentKeySizeGuess)
+            bestHammingDistance = hammingDistance
+            bestGuessKeySize = currentKeySizeGuess
+        }
+    }
+    // Now that you probably know the KEYSIZE: break the ciphertext into blocks of KEYSIZE length.
+    var keySizedBlocks [][]byte
+    keySizedBlock := make([]byte, bestGuessKeySize)
+    buffTwo := bytes.NewBuffer(rawContent)
+    for {
+        innerCopy := make([]byte, bestGuessKeySize)
+        read, err := buffTwo.Read(keySizedBlock)
+        if read == 0 {
+            break
+        }
+        copy(innerCopy, keySizedBlock)
+        keySizedBlocks = append(keySizedBlocks, innerCopy)
+        if err != nil {
+            break
+        }
+    }
+    fmt.Println(keySizedBlocks)
+    // Now transpose the blocks: make a block that is the first byte of every block, and a block that is the second byte of every block, and so on.
+    var transposedKeySizedBlocks [][]byte
+    tranposedKeySizedBlock := make([]byte, bestGuessKeySize)
+    for i := 0; i < bestGuessKeySize; i++ {
+        for _, block := range keySizedBlocks {
+            tranposedKeySizedBlock[i] = block[i]
+        }
+        transposedKeySizedBlocks = append(transposedKeySizedBlocks, tranposedKeySizedBlock)
+    }
+    fmt.Println(transposedKeySizedBlocks)
+    // Solve each block as if it was single-character XOR.
+    var key []byte
+    for _, block := range transposedKeySizedBlocks {
+        _, cipherKey, err := BreakSingleXORCipher(hex.EncodeToString(block))
+        if err != nil {
+            return 4
+        }
+        key = append(key, []byte(cipherKey)...)
+    }
+    fmt.Println(key)
+    // For each block, the single-byte XOR key that produces the best looking histogram is the repeating-key XOR key byte for that block. Put them together and you have the key.
+    return bestGuessKeySize
 }
 
 /*

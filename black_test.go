@@ -1,4 +1,4 @@
-package black
+package main
 
 import (
     "testing"
@@ -42,7 +42,6 @@ func TestBreakSingleXORCipher(t *testing.T) {
 }
 
 func TestDetectSingleXOR(t *testing.T) {
-    t.SkipNow()
     input := "samples/4.txt"
     expectedCipherKey := "5"
     expectedDecoded := "Now that the party is jumping\n"
@@ -51,9 +50,11 @@ func TestDetectSingleXOR(t *testing.T) {
     for _, guess := range singleXorGuesses {
         if guess.Decoded == expectedDecoded && guess.CipherKey == expectedCipherKey {
             detected = true
+            t.Log(guess)
             break
         }
     }
+
     if !detected {
         t.Errorf("Failed to detect value: %s\n XORed with %s in %s\n", expectedDecoded, expectedCipherKey, input)
     }
